@@ -590,14 +590,17 @@ function render(data) {
   pills.push('<span class="meta-pill">' + rawLines.length + ' lines</span>');
   els.meta.innerHTML = pills.join(' ');
 
-  const fieldOrder = [
-    'passport_number', 'surname', 'given_name', 'nationality', 'sex',
-    'date_of_birth', 'date_of_issue', 'date_of_expiry',
-    'place_of_birth', 'issuing_authority', 'personal_number', 'previous_passport_number',
-  ];
-  const rows = fieldOrder
-    .filter(k => data[k] !== undefined && data[k] !== null && data[k] !== '')
-    .map(k => fieldRow(k.replace(/_/g, ' '), data[k]));
+  const pairs = [];
+  for (const k of FIELDS) {
+    const val = data[k];
+    if (val === undefined || val === null || val === '') continue;
+    pairs.push({ label: k.replace(/_/g, ' '), value: String(val) });
+    if (k === 'date_of_birth') {
+      const age = ageFromBirth(val);
+      if (age !== null) pairs.push({ label: 'age', value: String(age) });
+    }
+  }
+  const rows = pairs.map(p => fieldRow(p.label, p.value));
   if (rows.length) {
     els.fieldsCard.style.display = 'block';
     els.fieldsBody.innerHTML = rows.join('');
@@ -623,18 +626,40 @@ function fieldRow(label, value) {
 function escapeHtml(s) { return s.replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
 function escapeAttr(s) { return s.replace(/"/g, '&quot;').replace(/</g, '&lt;'); }
 
+// Fields shown in the Detected Fields card + copied by "Copy all fields".
+// (place_of_birth, issuing_authority, personal_number intentionally excluded.)
+const FIELDS = [
+  'passport_number', 'surname', 'given_name', 'nationality', 'sex',
+  'date_of_birth', 'date_of_issue', 'date_of_expiry', 'previous_passport_number',
+];
+
+// Whole-year age from an ISO YYYY-MM-DD DOB, or null if it can't be parsed.
+function ageFromBirth(dob) {
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(dob || '').trim());
+  if (!m) return null;
+  const y = +m[1], mo = +m[2], d = +m[3];
+  if (mo < 1 || mo > 12 || d < 1 || d > 31) return null;
+  const now = new Date();
+  let age = now.getFullYear() - y;
+  const beforeBirthday = (now.getMonth() + 1) < mo || ((now.getMonth() + 1) === mo && now.getDate() < d);
+  if (beforeBirthday) age--;
+  return (age >= 0 && age < 150) ? age : null;
+}
+
 els.copyTextBtn.addEventListener('click', () => copy(els.textOut.textContent));
 els.copyFieldsBtn.addEventListener('click', () => {
   if (!lastData) return;
-  const fieldOrder = [
-    'passport_number', 'surname', 'given_name', 'nationality', 'sex',
-    'date_of_birth', 'date_of_issue', 'date_of_expiry',
-    'place_of_birth', 'issuing_authority', 'personal_number', 'previous_passport_number',
-  ];
-  const lines = fieldOrder
-    .filter(k => lastData[k] !== undefined && lastData[k] !== null && lastData[k] !== '')
-    .map(k => k.replace(/_/g, ' ') + ': ' + lastData[k]);
-  copy(lines.join('\n'));
+  const outPairs = [];
+  for (const k of FIELDS) {
+    const val = lastData[k];
+    if (val === undefined || val === null || val === '') continue;
+    outPairs.push(k.replace(/_/g, ' ') + ': ' + val);
+    if (k === 'date_of_birth') {
+      const age = ageFromBirth(val);
+      if (age !== null) outPairs.push('age: ' + age);
+    }
+  }
+  copy(outPairs.join('\n'));
 });
 </script>
 </body>
