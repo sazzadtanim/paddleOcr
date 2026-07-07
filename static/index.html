@@ -597,7 +597,7 @@ function render(data) {
     pairs.push({ label: k.replace(/_/g, ' '), value: String(val) });
     if (k === 'date_of_birth') {
       const age = ageFromBirth(val);
-      if (age !== null) pairs.push({ label: 'age', value: String(age) });
+      if (age !== null) pairs.push({ label: 'age', value: formatAge(age) });
     }
   }
   const rows = pairs.map(p => fieldRow(p.label, p.value));
@@ -634,16 +634,34 @@ const FIELDS = [
 ];
 
 // Whole-year age from an ISO YYYY-MM-DD DOB, or null if it can't be parsed.
-function ageFromBirth(dob) {
+function ageFromBirth(dob, now) {
   const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(dob || '').trim());
   if (!m) return null;
   const y = +m[1], mo = +m[2], d = +m[3];
   if (mo < 1 || mo > 12 || d < 1 || d > 31) return null;
-  const now = new Date();
-  let age = now.getFullYear() - y;
-  const beforeBirthday = (now.getMonth() + 1) < mo || ((now.getMonth() + 1) === mo && now.getDate() < d);
-  if (beforeBirthday) age--;
-  return (age >= 0 && age < 150) ? age : null;
+  now = now || new Date();
+  let years = now.getFullYear() - y;
+  let months = (now.getMonth() + 1) - mo;
+  let days = now.getDate() - d;
+  // Borrow when a component underflows. Days borrow the length of the month
+  // before 'now'; months borrow a year. This is the standard approach and
+  // matches how people count age verbally.
+  if (days < 0) {
+    months -= 1;
+    days += new Date(now.getFullYear(), now.getMonth(), 0).getDate();
+  }
+  if (months < 0) {
+    months += 12;
+    years -= 1;
+  }
+  if (years < 0 || years > 149) return null; // future or implausible
+  return { years, months, days };
+}
+
+// "36 years, 2 months, 15 days" with correct singular/plural forms.
+function formatAge(a) {
+  const fmt = (n, unit) => (n === 1 ? '1 ' + unit : n + ' ' + unit + 's');
+  return fmt(a.years, 'year') + ', ' + fmt(a.months, 'month') + ', ' + fmt(a.days, 'day');
 }
 
 els.copyTextBtn.addEventListener('click', () => copy(els.textOut.textContent));
@@ -656,7 +674,7 @@ els.copyFieldsBtn.addEventListener('click', () => {
     outPairs.push(k.replace(/_/g, ' ') + ': ' + val);
     if (k === 'date_of_birth') {
       const age = ageFromBirth(val);
-      if (age !== null) outPairs.push('age: ' + age);
+      if (age !== null) outPairs.push('age: ' + formatAge(age));
     }
   }
   copy(outPairs.join('\n'));
