@@ -106,14 +106,17 @@ def run_raw_ocr(img_array):
 # ---------------------------------------------------------------------------
 # MRZ detection
 #
-# IMPORTANT: PaddleOCR frequently drops the '<' filler glyph entirely (not just
-# trailing padding — it can vanish from the middle of a line too), so detection
-# and parsing must not assume '<' survived. We detect MRZ lines structurally:
-#   line1: "P" + 3-letter country code + letters only (name data), no digits
+# We detect MRZ lines structurally. Two generations of OCR behavior must both
+# be handled:
+#   * Old PaddleOCR (2.x) frequently DROPPED the '<' filler glyph entirely.
+#   * PP-OCRv6 (3.x) reads MRZ far more accurately and PRESERVES '<' fillers.
+# So line1 can be either "P<BGD..." (filler present, ICAO 9303 standard) or
+# "PBGD..." (filler dropped). Detection and parsing handle both.
+#   line1: "P" + optional "<" + 3-letter country code + name data, no digits
 #   line2: mostly digits/letters with an isolated M/F sex marker, length 30-44
 # ---------------------------------------------------------------------------
 
-MRZ_LINE1_RE = re.compile(r"^P[A-Z]{3}[A-Z<]{10,45}$")
+MRZ_LINE1_RE = re.compile(r"^P<?[A-Z]{3}[A-Z<]{10,45}$")
 MRZ_LINE2_RE = re.compile(r"^[A-Z0-9<]{30,44}$")
 
 # Common OCR misreads when the expected character is a digit
@@ -215,8 +218,13 @@ def split_name_blob(blob, raw_lines):
 def parse_mrz(line1, line2, raw_lines):
     """Parse TD3 (passport) MRZ. Handles variable-length lines (dropped '<')."""
     # ---- Line 1: names ----
-    country_code = line1[1:4]
-    names_blob = line1[4:]
+    # Standard TD3 is "P<" + country(3) + names, but the "<" after "P" is
+    # sometimes dropped by OCR, so skip it only when present.
+    body = line1[1:]
+    if body[:1] == "<":
+        body = body[1:]
+    country_code = body[:3]
+    names_blob = body[3:]
     surname, given_name = split_name_blob(names_blob, raw_lines)
 
     # ---- Line 2: fixed-width header (28 chars) is reliable — no filler chars
@@ -330,25 +338,83 @@ def find_previous_passport_number(lines, current_passport_number):
     return None
 
 
-LABEL_KEYWORDS = {
-    "place_of_birth": ["birth"],  # DOB has no separate label in raw OCR here, so
-                                    # any 'birth' fragment left over refers to place
-    "issuing_authority": ["author", "issuing"],
+# Field labels are heavily garbled by OCR (the left side is often noise, e.g.
+# "Psyta/Place of Birth"), but the recognizable keyword usually survives. We
+# match a keyword, then scan FORWARD for the first value-like line — skipping
+# the junk (other columns' lines, dates, single chars, other labels) that OCR
+# interleaves between a label and its value in multi-column passport layouts.
+VIZ_FIELD_SPECS = {
+    # field: (match_keywords, exclude_keywords)
+    "place_of_birth": (["birth"], ["date", "dare", "dob"]),  # "birth" but not "Date of Birth"
+    "issuing_authority": (["authority", "issuing"], []),
 }
+# Issuing authorities are frequently "CODE/CITY" (e.g. "DIP/DHAKA"); reliable
+# when present, so it takes priority over the (garbled) label scan.
+ISSUING_AUTHORITY_RE = re.compile(r"^[A-Z]{2,8}/[A-Z\s]{2,}$")
+# Numeric dates OCR sometimes emits ("06.09.68") alongside the textual ones.
+NUMERIC_DATE_RE = re.compile(r"^\d{1,2}[.\-/]\d{1,2}[.\-/]\d{2,4}$")
+# How many lines forward to look for a label's value (caps how far a scan can
+# stray into unrelated / MRZ lines if the real value is missing).
+_VIZ_SCAN_WINDOW = 6
 
 
-def parse_viz_labels(lines):
-    """Best-effort label-then-next-line matching for fields with no more
-    reliable extraction path available."""
+def _is_viz_value(text, known_values, all_keywords):
+    """True if `text` looks like a field value rather than a label, date,
+    number, or already-known MRZ field."""
+    t = text.strip()
+    if len(t) < 2:
+        return False
+    tu = t.upper().replace(" ", "")
+    if DATE_TEXT_RE.search(t) or NUMERIC_DATE_RE.match(t):
+        return False
+    if re.fullmatch(r"[\d<]+", t):
+        return False
+    if PASSPORT_LIKE_RE.match(tu):
+        return False
+    if t.upper() in known_values:
+        return False
+    tl = t.lower()
+    if any(kw in tl for kws in all_keywords for kw in kws):
+        return False  # still a garbled label — keep scanning
+    return True
+
+
+def parse_viz_labels(lines, mrz_fields=None):
+    """Extract VIZ-only fields (place_of_birth, issuing_authority) that have no
+    counterpart in the MRZ. Uses a structural forward-scan rather than relying
+    on the immediate next line, which is unreliable in multi-column layouts."""
+    mrz_fields = mrz_fields or {}
     texts = [l["text"] for l in lines]
-    lower_texts = [t.lower() for t in texts]
-    fields = {k: None for k in LABEL_KEYWORDS}
+    lower = [t.lower() for t in texts]
+    all_keywords = [kws for kws, _ in VIZ_FIELD_SPECS.values()]
 
-    for field, keywords in LABEL_KEYWORDS.items():
-        for i, lt in enumerate(lower_texts):
-            if any(kw in lt for kw in keywords):
-                if i + 1 < len(texts):
-                    fields[field] = texts[i + 1].strip()
+    known_values = {
+        str(v).upper() for v in (
+            mrz_fields.get("surname"), mrz_fields.get("given_name"),
+            mrz_fields.get("nationality"), mrz_fields.get("passport_number"),
+            mrz_fields.get("country_code"), mrz_fields.get("sex"),
+            mrz_fields.get("personal_number"),
+        ) if v
+    }
+
+    fields = {k: None for k in VIZ_FIELD_SPECS}
+
+    # Issuing authority: prefer the reliable CODE/CITY slash pattern.
+    for t in texts:
+        if ISSUING_AUTHORITY_RE.match(t.strip()):
+            fields["issuing_authority"] = t.strip()
+            break
+
+    # Label-then-forward-scan for any field still unresolved.
+    for field, (keywords, excludes) in VIZ_FIELD_SPECS.items():
+        if fields[field] is not None:
+            continue
+        for i, lt in enumerate(lower):
+            if any(kw in lt for kw in keywords) and not any(ex in lt for ex in excludes):
+                for t in texts[i + 1 : i + 1 + _VIZ_SCAN_WINDOW]:
+                    if _is_viz_value(t, known_values, all_keywords):
+                        fields[field] = t.strip()
+                        break
                 break
 
     return fields
@@ -372,7 +438,7 @@ async def run_ocr(file: UploadFile = File(...)):
     if mrz:
         mrz_fields = parse_mrz(mrz[0], mrz[1], raw_texts)
 
-    viz_fields = parse_viz_labels(lines)
+    viz_fields = parse_viz_labels(lines, mrz_fields)
     date_of_issue = find_date_of_issue(
         lines, mrz_fields.get("date_of_birth"), mrz_fields.get("date_of_expiry")
     )
