@@ -1,9 +1,9 @@
 import io
 import re
 import numpy as np
-from fastapi import FastAPI, File, UploadFile
+from fastapi import FastAPI, File, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.staticfiles import StaticFiles
+from fastapi.responses import FileResponse
 from pathlib import Path
 from paddleocr import PaddleOCR
 from PIL import Image
@@ -450,7 +450,10 @@ def parse_viz_labels(lines, mrz_fields=None):
 @app.post("/ocr")
 async def run_ocr(file: UploadFile = File(...)):
     contents = await file.read()
-    image = Image.open(io.BytesIO(contents)).convert("RGB")
+    try:
+        image = Image.open(io.BytesIO(contents)).convert("RGB")
+    except Exception:
+        raise HTTPException(status_code=400, detail="Uploaded file is not a valid image.")
     img_array = np.array(image)
 
     lines = run_raw_ocr(img_array)
@@ -491,10 +494,17 @@ async def run_ocr(file: UploadFile = File(...)):
     return response
 
 
-# Serve the standalone browser UI (static/index.html). Mounted LAST so the
-# API routes above (/health, /ocr) are matched first — Starlette checks
-# routes in registration order, so a catch-all mount at "/" must come after
-# every explicit endpoint.
-_STATIC_DIR = Path(__file__).parent / "static"
-if _STATIC_DIR.is_dir():
-    app.mount("/", StaticFiles(directory=str(_STATIC_DIR), html=True), name="static")
+# Serve the standalone browser UI. An explicit root route (NOT a catch-all
+# StaticFiles mount) keeps routing unambiguous: with a catch-all mount at
+# "/", any POST that doesn't *exactly* match an API route (e.g. a trailing
+# slash like "/ocr/") falls through to StaticFiles, which only allows
+# GET/HEAD and returns a confusing 405. An explicit route lets FastAPI's
+# default redirect_slashes turn "/ocr/" into a 307 -> "/ocr" instead.
+_INDEX = Path(__file__).parent / "static" / "index.html"
+
+
+@app.get("/")
+def index():
+    if _INDEX.is_file():
+        return FileResponse(str(_INDEX))
+    raise HTTPException(status_code=404, detail="UI not bundled.")
