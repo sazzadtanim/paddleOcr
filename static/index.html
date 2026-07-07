@@ -65,7 +65,18 @@
   .drop .hint { color: var(--muted); font-size: 13px; margin-top: 6px; }
   .drop input { display: none; }
 
-  .editor { display: none; margin-top: 16px; }
+  .editor { flex: 1 1 480px; min-width: 0; }
+  .workarea { display: none; gap: 20px; align-items: flex-start; margin-top: 16px; flex-wrap: wrap; }
+  .workarea.show { display: flex; }
+  .fields {
+    flex: 1 1 300px; min-width: 280px;
+    background: var(--bg); border: 1px solid var(--border); border-radius: 10px;
+    padding: 16px; display: none;
+  }
+  .fields.show { display: block; }
+  .fields-head { display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; gap: 10px; flex-wrap: wrap; }
+  .fields-meta { margin-bottom: 12px; }
+  .fields-empty { color: var(--muted); font-size: 13px; font-style: italic; padding: 24px 0; text-align: center; }
   .canvas-wrap {
     background: #000; border: 1px solid var(--border); border-radius: 10px;
     text-align: center; padding: 8px; max-height: 460px; overflow: auto;
@@ -178,6 +189,7 @@
       <input id="fileInput" type="file" accept="image/*" />
     </div>
 
+    <div class="workarea" id="workarea">
     <div class="editor" id="editor">
       <div class="canvas-wrap"><canvas id="editCanvas"></canvas></div>
       <div class="toolbar">
@@ -208,31 +220,22 @@
       </div>
     </div>
 
+    <aside class="fields" id="fieldsCard">
+      <div class="fields-head">
+        <h2 style="margin:0;">Detected Fields</h2>
+        <button class="btn small" id="copyFieldsBtn">📋 Copy all fields</button>
+      </div>
+      <div id="meta" class="fields-meta"></div>
+      <div class="fields-empty" id="fieldsEmpty">Run OCR to see detected fields here.</div>
+      <div id="fieldsBody"></div>
+    </aside>
+    </div>
+
     <div class="actions">
       <button class="btn" id="runBtn" disabled>Run OCR</button>
       <button class="btn ghost" id="clearBtn" disabled>Clear</button>
     </div>
     <div class="status" id="status"></div>
-  </div>
-
-  <!-- Results -->
-  <div class="results" id="results">
-    <div class="card">
-      <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:14px; flex-wrap:wrap; gap:10px;">
-        <h2 style="margin:0;">Extracted Text</h2>
-        <button class="btn small" id="copyTextBtn">📋 Copy text</button>
-      </div>
-      <div class="text-out" id="textOut"></div>
-      <div id="meta" style="margin-top:12px; font-size:12px;"></div>
-    </div>
-
-    <div class="card" id="fieldsCard" style="display:none;">
-      <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:14px;">
-        <h2 style="margin:0;">Detected Fields</h2>
-        <button class="btn small" id="copyFieldsBtn">📋 Copy all fields</button>
-      </div>
-      <div id="fieldsBody"></div>
-    </div>
   </div>
 </div>
 
@@ -245,6 +248,7 @@ const els = {
   drop: document.getElementById('drop'),
   fileInput: document.getElementById('fileInput'),
   editor: document.getElementById('editor'),
+  workarea: document.getElementById('workarea'),
   editCanvas: document.getElementById('editCanvas'),
   rotL: document.getElementById('rotL'),
   rotR: document.getElementById('rotR'),
@@ -261,12 +265,10 @@ const els = {
   runBtn: document.getElementById('runBtn'),
   clearBtn: document.getElementById('clearBtn'),
   status: document.getElementById('status'),
-  results: document.getElementById('results'),
-  textOut: document.getElementById('textOut'),
   meta: document.getElementById('meta'),
   fieldsCard: document.getElementById('fieldsCard'),
   fieldsBody: document.getElementById('fieldsBody'),
-  copyTextBtn: document.getElementById('copyTextBtn'),
+  fieldsEmpty: document.getElementById('fieldsEmpty'),
   copyFieldsBtn: document.getElementById('copyFieldsBtn'),
   toast: document.getElementById('toast'),
 };
@@ -495,11 +497,14 @@ function setFile(file) {
     edit = defaultEdit();
     syncControls();
     els.drop.style.display = 'none';
-    els.editor.style.display = 'block';
+    els.workarea.classList.add('show');
     els.runBtn.disabled = false;
     els.clearBtn.disabled = false;
     setStatus('');
-    els.results.classList.remove('show');
+    els.fieldsCard.classList.remove('show');
+    els.fieldsBody.innerHTML = '';
+    els.meta.innerHTML = '';
+    els.fieldsEmpty.style.display = '';
     paint();
   };
   img.onerror = () => setStatus('Could not load that image.', 'err');
@@ -509,12 +514,12 @@ function setFile(file) {
 function clearAll() {
   srcImg = null; processedCanvas = null;
   els.drop.style.display = 'block';
-  els.editor.style.display = 'none';
+  els.workarea.classList.remove('show');
   els.fileInput.value = '';
   els.runBtn.disabled = true;
   els.clearBtn.disabled = true;
   setStatus('');
-  els.results.classList.remove('show');
+  els.fieldsCard.classList.remove('show');
 }
 
 els.drop.addEventListener('click', () => els.fileInput.click());
@@ -579,7 +584,6 @@ async function runOcr() {
 function render(data) {
   const meta = data._meta || {};
   const rawLines = (meta.raw_lines || []).slice();
-  els.textOut.textContent = rawLines.join('\n').trim();
 
   const pills = [];
   pills.push(meta.mrz_detected ? '<span class="meta-pill ok">MRZ detected</span>' : '<span class="meta-pill">no MRZ</span>');
@@ -600,19 +604,18 @@ function render(data) {
       if (age !== null) pairs.push({ label: 'age', value: formatAge(age) });
     }
   }
-  const rows = pairs.map(p => fieldRow(p.label, p.value));
-  if (rows.length) {
-    els.fieldsCard.style.display = 'block';
-    els.fieldsBody.innerHTML = rows.join('');
+
+  els.fieldsCard.classList.add('show');
+  if (pairs.length) {
+    els.fieldsEmpty.style.display = 'none';
+    els.fieldsBody.innerHTML = pairs.map(p => fieldRow(p.label, p.value)).join('');
     els.fieldsBody.querySelectorAll('[data-copy]').forEach(b =>
       b.addEventListener('click', () => copy(b.getAttribute('data-copy')))
     );
   } else {
-    els.fieldsCard.style.display = 'none';
+    els.fieldsEmpty.style.display = '';
+    els.fieldsBody.innerHTML = '';
   }
-
-  els.results.classList.add('show');
-  els.results.scrollIntoView({ behavior: 'smooth', block: 'start' });
 }
 
 function fieldRow(label, value) {
@@ -664,7 +667,6 @@ function formatAge(a) {
   return fmt(a.years, 'year') + ', ' + fmt(a.months, 'month') + ', ' + fmt(a.days, 'day');
 }
 
-els.copyTextBtn.addEventListener('click', () => copy(els.textOut.textContent));
 els.copyFieldsBtn.addEventListener('click', () => {
   if (!lastData) return;
   const outPairs = [];
