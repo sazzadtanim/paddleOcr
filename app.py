@@ -131,8 +131,18 @@ def fix_numeric_field(s):
 def find_mrz_lines(lines):
     """Return the two MRZ lines (TD3 passport format) if found, else None.
     Lines are NOT force-padded to 44 chars here — callers must handle
-    variable length since dropped '<' can shrink either line unpredictably."""
-    candidates = [l["text"].upper().replace(" ", "") for l in lines]
+    variable length since dropped '<' can shrink either line unpredictably.
+
+    The MRZ alphabet is only A-Z, 0-9, and '<' as a filler. OCR frequently
+    misreads the '<' filler as '>' (most common), '~', or '«', especially in
+    the long trailing filler runs of line 1. A single stray '>' anywhere breaks
+    the structural regexes below (which only allow [A-Z<]), so normalize those
+    filler substitutes back to '<' before matching. Digit/letter confusions in
+    numeric fields are handled later by fix_numeric_field()."""
+    candidates = [
+        l["text"].upper().replace(" ", "").replace(">", "<").replace("~", "<").replace("«", "<")
+        for l in lines
+    ]
     for i in range(len(candidates) - 1):
         l1, l2 = candidates[i], candidates[i + 1]
         if MRZ_LINE1_RE.match(l1) and MRZ_LINE2_RE.match(l2) and re.search(r"\d", l2) and ("M" in l2 or "F" in l2):
