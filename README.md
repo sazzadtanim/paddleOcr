@@ -1,7 +1,8 @@
 # PaddleOCR API (English, forced)
 
-Minimal FastAPI wrapper around PaddleOCR, forced to English (`lang="en"`).
-Built for deployment on Dokploy via Docker Compose.
+Minimal FastAPI wrapper around PaddleOCR, forced to English (`lang="en"`) and
+running **PP-OCRv6** (paddleocr 3.7.0 / paddlepaddle 3.1.1). Built for
+deployment on Dokploy via Docker Compose.
 
 ## Deploy on Dokploy
 
@@ -11,8 +12,10 @@ Built for deployment on Dokploy via Docker Compose.
 4. Assign a domain to the `paddleocr` service in Dokploy's UI (it listens on
    internal port `8000`, not published to host — Dokploy's Traefik handles
    routing/SSL).
-5. First request after deploy will be slow (models download into the
-   `paddleocr_models` volume). Subsequent restarts reuse the cached volume.
+5. The PP-OCRv6 models (~150MB) are **downloaded during the Docker build**
+   and baked into the image, so the first request after deploy is fast and the
+   container needs no runtime network access. Each image rebuild re-downloads
+   them once (build needs network).
 
 ## Endpoints
 
@@ -38,5 +41,8 @@ Response:
 ## Notes
 
 - Language is hardcoded to English in `app.py` — not configurable via env var.
+- Model version is **PP-OCRv6** (the default for paddleocr 3.x). To pin a
+  different version/tier, edit the `ocr_version` / `text_*_model_name` args in
+  `app.py` (and mirror the change in the Dockerfile pre-download step).
 - Adjust `deploy.resources.limits.memory` in `docker-compose.yml` based on
-  your VPS size.
+  your VPS size (2G is comfortable for the PP-OCRv6 medium tier on CPU).

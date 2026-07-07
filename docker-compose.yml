@@ -5,11 +5,8 @@ services:
     container_name: paddleocr-api
     environment:
       - TZ=Asia/Dhaka
-      - MODEL_DIR=/models
     expose:
       - "8000"
-    volumes:
-      - paddleocr_models:/models
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
@@ -23,8 +20,6 @@ services:
           memory: 2G
     networks:
       - dokploy-network
-volumes:
-  paddleocr_models:
 networks:
   dokploy-network:
     external: true

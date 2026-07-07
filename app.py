@@ -1,4 +1,3 @@
-import os
 import io
 import re
 import numpy as np
@@ -8,17 +7,21 @@ from PIL import Image
 
 app = FastAPI()
 
-# Forced English — not configurable via env var
+# Forced English, PP-OCRv6 — not configurable via env var
 LANG = "en"
-MODEL_DIR = os.getenv("MODEL_DIR", "/models")
 
+# PP-OCRv6 API (paddleocr >= 3.0). The old 2.x kwargs are gone:
+#   use_angle_cls  -> use_textline_orientation
+#   det/rec/cls_model_dir, show_log -> removed
+#   ocr.ocr(img, cls=True)         -> ocr.predict(img)
+# Models are auto-downloaded on first init (baked into the image at build
+# time — see Dockerfile), so no MODEL_DIR / volume is needed.
 ocr = PaddleOCR(
-    use_angle_cls=True,
+    ocr_version="PP-OCRv6",
     lang=LANG,
-    det_model_dir=f"{MODEL_DIR}/det",
-    rec_model_dir=f"{MODEL_DIR}/rec",
-    cls_model_dir=f"{MODEL_DIR}/cls",
-    show_log=False,
+    use_doc_orientation_classify=False,
+    use_doc_unwarping=False,
+    use_textline_orientation=True,
 )
 
 
@@ -32,11 +35,23 @@ def health():
 # ---------------------------------------------------------------------------
 
 def run_raw_ocr(img_array):
-    """Run PaddleOCR and return list of recognized text lines (top to bottom)."""
-    result = ocr.ocr(img_array, cls=True)
+    """Run PaddleOCR (PP-OCRv6) and return recognized text lines (top to bottom).
+
+    3.x API: predict() returns a list of result objects (one per image). Each
+    exposes parallel arrays — rec_texts / rec_scores / dt_polys — instead of the
+    old 2.x ``[[box, (text, conf)], ...]`` tuples. We normalize back into the
+    {text, confidence, y} shape the rest of the pipeline already expects, so the
+    MRZ/VIZ parsing below needs no changes.
+    """
+    results = ocr.predict(img_array)
+    res = results[0]
+    data = getattr(res, "json", None) or res
+
     lines = []
-    for line in result[0] if result and result[0] else []:
-        box, (text, confidence) = line
+    for text, confidence, poly in zip(
+        data["rec_texts"], data["rec_scores"], data["dt_polys"]
+    ):
+        box = [[float(p[0]), float(p[1])] for p in poly]
         y = min(point[1] for point in box)
         lines.append({"text": text, "confidence": float(confidence), "y": y})
     lines.sort(key=lambda l: l["y"])
