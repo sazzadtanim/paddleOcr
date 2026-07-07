@@ -27,7 +27,7 @@
     min-height: 100vh;
     padding: 32px 20px 64px;
   }
-  .wrap { max-width: 880px; margin: 0 auto; }
+  .wrap { max-width: 900px; margin: 0 auto; }
   header { text-align: center; margin-bottom: 28px; }
   header h1 { font-size: 26px; margin: 0 0 6px; letter-spacing: -0.02em; }
   header p { margin: 0; color: var(--muted); font-size: 14px; }
@@ -56,7 +56,7 @@
     padding: 38px 20px;
     text-align: center;
     cursor: pointer;
-    transition: border-color .15s, background .15s, transform .05s;
+    transition: border-color .15s, background .15s;
     user-select: none;
   }
   .drop:hover { border-color: var(--accent); background: rgba(99,102,241,.05); }
@@ -65,11 +65,33 @@
   .drop .hint { color: var(--muted); font-size: 13px; margin-top: 6px; }
   .drop input { display: none; }
 
-  .preview { display: none; margin-top: 16px; text-align: center; }
-  .preview img {
-    max-width: 100%; max-height: 320px; border-radius: 10px;
-    border: 1px solid var(--border); object-fit: contain; background: #000;
+  .editor { display: none; margin-top: 16px; }
+  .canvas-wrap {
+    background: #000; border: 1px solid var(--border); border-radius: 10px;
+    text-align: center; padding: 8px; max-height: 460px; overflow: auto;
+    line-height: 0;
   }
+  #editCanvas { max-width: 100%; max-height: 440px; cursor: crosshair; touch-action: none; }
+
+  .toolbar { margin-top: 14px; display: flex; flex-direction: column; gap: 10px; }
+  .tool-row { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+  .tool-row .lbl { font-size: 12px; color: var(--muted); min-width: 88px; }
+  .tool-row .val { font-size: 12px; color: var(--text); min-width: 36px; text-align: right; font-family: ui-monospace, Menlo, monospace; }
+
+  input[type="range"] {
+    flex: 1; min-width: 140px; accent-color: var(--accent); cursor: pointer;
+  }
+  input[type="range"]:disabled { opacity: .4; }
+
+  .toggle {
+    background: var(--bg); color: var(--text); border: 1px solid var(--border);
+    border-radius: 8px; padding: 6px 12px; font-size: 12px; cursor: pointer;
+    transition: background .12s, border-color .12s;
+  }
+  .toggle:hover { border-color: var(--accent); }
+  .toggle.active { background: var(--accent); border-color: var(--accent); color: #fff; }
+
+  .crop-hint { font-size: 12px; color: var(--muted); margin-top: 8px; }
 
   .actions { display: flex; gap: 10px; margin-top: 16px; flex-wrap: wrap; }
   button.btn {
@@ -80,9 +102,7 @@
   button.btn:hover { background: var(--accent-hover); }
   button.btn:active { transform: translateY(1px); }
   button.btn:disabled { opacity: .5; cursor: not-allowed; }
-  button.btn.ghost {
-    background: transparent; color: var(--text); border: 1px solid var(--border);
-  }
+  button.btn.ghost { background: transparent; color: var(--text); border: 1px solid var(--border); }
   button.btn.ghost:hover { background: rgba(255,255,255,.05); }
   button.btn.small { padding: 6px 12px; font-size: 12px; font-weight: 500; }
 
@@ -98,11 +118,11 @@
 
   .results { display: none; }
   .results.show { display: block; }
-  .results h2 { font-size: 15px; margin: 0 0 14px; color: var(--text); }
+  .results h2 { font-size: 15px; margin: 0 0 14px; }
 
   .text-out {
     background: var(--bg); border: 1px solid var(--border); border-radius: 10px;
-    padding: 14px; font-family: "SFMono-Regular", ui-monospace, Menlo, Consolas, monospace;
+    padding: 14px; font-family: ui-monospace, Menlo, Consolas, monospace;
     font-size: 13.5px; line-height: 1.6; white-space: pre-wrap; word-break: break-word;
     max-height: 360px; overflow: auto; color: #f1f5f9;
   }
@@ -114,7 +134,7 @@
   }
   .field-row:last-child { border-bottom: none; }
   .field-row .k { color: var(--muted); font-size: 13px; min-width: 150px; text-transform: capitalize; }
-  .field-row .v { font-size: 14px; flex: 1; word-break: break-word; font-family: ui-monospace, Menlo, Consolas, monospace; }
+  .field-row .v { font-size: 14px; flex: 1; word-break: break-word; font-family: ui-monospace, Menlo, monospace; }
   .field-row .v.empty { color: var(--muted); font-style: italic; font-family: inherit; }
 
   .toast {
@@ -137,7 +157,7 @@
 <div class="wrap">
   <header>
     <h1>📷 Image to Text</h1>
-    <p>Upload an image, get the OCR text out — copy it with one click.</p>
+    <p>Upload, tweak the image, then run OCR — copy the text with one click.</p>
   </header>
 
   <!-- API settings -->
@@ -149,7 +169,7 @@
     </div>
   </div>
 
-  <!-- Upload -->
+  <!-- Upload + Edit -->
   <div class="card">
     <div class="drop" id="drop">
       <div class="big">⬆️</div>
@@ -157,9 +177,37 @@
       <div class="hint">PNG, JPG, WEBP, BMP, GIF</div>
       <input id="fileInput" type="file" accept="image/*" />
     </div>
-    <div class="preview" id="preview">
-      <img id="previewImg" alt="preview" />
+
+    <div class="editor" id="editor">
+      <div class="canvas-wrap"><canvas id="editCanvas"></canvas></div>
+      <div class="toolbar">
+        <div class="tool-row">
+          <button class="toggle" id="rotL" title="Rotate 90° left">⟲ Rotate</button>
+          <button class="toggle" id="rotR" title="Rotate 90° right">⟳ Rotate</button>
+          <button class="toggle" id="grayBtn">Greyscale</button>
+          <button class="toggle" id="bwBtn">B/W (binarize)</button>
+          <button class="toggle" id="clearCropBtn">Clear crop</button>
+          <button class="toggle" id="resetBtn">Reset all</button>
+        </div>
+        <div class="tool-row">
+          <span class="lbl">Brightness</span>
+          <input type="range" id="brightness" min="-100" max="100" value="0" />
+          <span class="val" id="brightnessVal">0</span>
+        </div>
+        <div class="tool-row">
+          <span class="lbl">Contrast</span>
+          <input type="range" id="contrast" min="-100" max="100" value="0" />
+          <span class="val" id="contrastVal">0</span>
+        </div>
+        <div class="tool-row">
+          <span class="lbl">Threshold</span>
+          <input type="range" id="threshold" min="0" max="255" value="128" disabled />
+          <span class="val" id="thresholdVal">128</span>
+        </div>
+        <div class="crop-hint">Drag on the image to crop. The bright box is what gets read; everything dimmed is discarded.</div>
+      </div>
     </div>
+
     <div class="actions">
       <button class="btn" id="runBtn" disabled>Run OCR</button>
       <button class="btn ghost" id="clearBtn" disabled>Clear</button>
@@ -196,8 +244,20 @@ const els = {
   testBtn: document.getElementById('testBtn'),
   drop: document.getElementById('drop'),
   fileInput: document.getElementById('fileInput'),
-  preview: document.getElementById('preview'),
-  previewImg: document.getElementById('previewImg'),
+  editor: document.getElementById('editor'),
+  editCanvas: document.getElementById('editCanvas'),
+  rotL: document.getElementById('rotL'),
+  rotR: document.getElementById('rotR'),
+  grayBtn: document.getElementById('grayBtn'),
+  bwBtn: document.getElementById('bwBtn'),
+  clearCropBtn: document.getElementById('clearCropBtn'),
+  resetBtn: document.getElementById('resetBtn'),
+  brightness: document.getElementById('brightness'),
+  brightnessVal: document.getElementById('brightnessVal'),
+  contrast: document.getElementById('contrast'),
+  contrastVal: document.getElementById('contrastVal'),
+  threshold: document.getElementById('threshold'),
+  thresholdVal: document.getElementById('thresholdVal'),
   runBtn: document.getElementById('runBtn'),
   clearBtn: document.getElementById('clearBtn'),
   status: document.getElementById('status'),
@@ -211,12 +271,21 @@ const els = {
   toast: document.getElementById('toast'),
 };
 
-let currentFile = null;
+// --- Editable state ---------------------------------------------------------
+// srcImg: pristine decoded original (never mutated). edit: current transforms.
+// Crop is stored in full-res processed-canvas coordinates (rotation-aware),
+// so it survives brightness/contrast/threshold changes without drifting.
+let srcImg = null;
 let lastData = null;
+let edit = { rotate: 0, brightness: 0, contrast: 0, grayscale: false, threshold: -1, crop: null };
+let processedW = 0, processedH = 0;   // dims of the rotated (pre-crop) image
+let processedCanvas = null;           // offscreen clean processed image (no overlay)
 
-// Default the endpoint to the same origin serving this page (the API is
-// mounted alongside the UI), unless the user previously overrode it. Fall
-// back to localhost when opened from disk (file:// -> origin is "null").
+function defaultEdit() {
+  return { rotate: 0, brightness: 0, contrast: 0, grayscale: false, threshold: -1, crop: null };
+}
+
+// --- Endpoint ---------------------------------------------------------------
 const SAVED = localStorage.getItem('ocrEndpoint');
 const origin = window.location.origin;
 const fallback = origin && origin !== 'null' ? origin : 'http://localhost:8000';
@@ -241,7 +310,6 @@ async function copy(text) {
     await navigator.clipboard.writeText(text);
     showToast('Copied!');
   } catch (e) {
-    // Fallback for non-secure contexts (e.g. http://)
     const ta = document.createElement('textarea');
     ta.value = text; ta.style.position = 'fixed'; ta.style.opacity = '0';
     document.body.appendChild(ta); ta.select();
@@ -251,26 +319,183 @@ async function copy(text) {
   }
 }
 
+function clamp(v, lo, hi) { return Math.max(lo, Math.min(hi, v)); }
+
+// --- Rendering pipeline -----------------------------------------------------
+// Order: rotate → (grayscale/brightness/contrast via ctx.filter) → threshold.
+// These all run on a full-res offscreen canvas; the visible canvas just shows
+// it scaled down with the crop overlay drawn on top.
+function buildProcessed() {
+  if (!srcImg || !srcImg.complete) return;
+  const rot = ((edit.rotate % 360) + 360) % 360;
+  const swap = rot === 90 || rot === 270;
+  const w = swap ? srcImg.naturalHeight : srcImg.naturalWidth;
+  const h = swap ? srcImg.naturalWidth : srcImg.naturalHeight;
+  processedW = w; processedH = h;
+
+  const c = document.createElement('canvas');
+  c.width = Math.max(1, w); c.height = Math.max(1, h);
+  const ctx = c.getContext('2d', { willReadFrequently: true });
+
+  const parts = [];
+  if (edit.grayscale) parts.push('grayscale(1)');
+  if (edit.brightness) parts.push('brightness(' + (1 + edit.brightness / 100).toFixed(3) + ')');
+  if (edit.contrast) parts.push('contrast(' + (1 + edit.contrast / 100).toFixed(3) + ')');
+  ctx.filter = parts.length ? parts.join(' ') : 'none';
+  ctx.save();
+  ctx.translate(w / 2, h / 2);
+  ctx.rotate(rot * Math.PI / 180);
+  ctx.drawImage(srcImg, -srcImg.naturalWidth / 2, -srcImg.naturalHeight / 2);
+  ctx.restore();
+  ctx.filter = 'none';
+
+  if (edit.threshold >= 0) {
+    const img = ctx.getImageData(0, 0, w, h);
+    const d = img.data;
+    const t = edit.threshold;
+    for (let i = 0; i < d.length; i += 4) {
+      const lum = 0.299 * d[i] + 0.587 * d[i + 1] + 0.114 * d[i + 2];
+      const v = lum > t ? 255 : 0;
+      d[i] = d[i + 1] = d[i + 2] = v;
+    }
+    ctx.putImageData(img, 0, 0);
+  }
+  processedCanvas = c;
+}
+
+function paint() {
+  buildProcessed();
+  if (!processedCanvas) return;
+  const dc = els.editCanvas;
+  dc.width = processedW; dc.height = processedH;
+  const ctx = dc.getContext('2d');
+  ctx.drawImage(processedCanvas, 0, 0);
+
+  // Crop overlay: dim outside the box, bright border on the box.
+  if (edit.crop) {
+    const { x, y, w, h } = edit.crop;
+    const lw = Math.max(2, processedW / 240);
+    ctx.save();
+    ctx.fillStyle = 'rgba(0,0,0,0.55)';
+    ctx.fillRect(0, 0, processedW, y);
+    ctx.fillRect(0, y + h, processedW, processedH - (y + h));
+    ctx.fillRect(0, y, x, h);
+    ctx.fillRect(x + w, y, processedW - (x + w), h);
+    ctx.strokeStyle = '#6366f1';
+    ctx.lineWidth = lw;
+    ctx.strokeRect(x, y, w, h);
+    ctx.restore();
+  }
+}
+
+// Produce the final PNG blob sent to OCR: processed image, cropped if set.
+function buildOutputBlob() {
+  let src = processedCanvas;
+  const cr = edit.crop;
+  if (cr && cr.w > 2 && cr.h > 2) {
+    const out = document.createElement('canvas');
+    out.width = Math.round(cr.w); out.height = Math.round(cr.h);
+    out.getContext('2d').drawImage(
+      processedCanvas,
+      cr.x, cr.y, cr.w, cr.h,
+      0, 0, out.width, out.height
+    );
+    src = out;
+  }
+  return new Promise(res => src.toBlob(b => res(b), 'image/png'));
+}
+
+// --- Crop interaction (mouse + touch) ---------------------------------------
+function eventPos(e) {
+  const r = els.editCanvas.getBoundingClientRect();
+  const sx = processedW / r.width, sy = processedH / r.height;
+  const pt = (e.touches && e.touches[0]) ? e.touches[0] : e;
+  return { x: (pt.clientX - r.left) * sx, y: (pt.clientY - r.top) * sy };
+}
+
+let dragging = false, dragStart = null;
+function onDown(e) {
+  if (!processedCanvas) return;
+  e.preventDefault();
+  dragging = true;
+  dragStart = eventPos(e);
+  edit.crop = { x: dragStart.x, y: dragStart.y, w: 0, h: 0 };
+  paint();
+}
+function onMove(e) {
+  if (!dragging) return;
+  e.preventDefault();
+  const p = eventPos(e);
+  const x0 = clamp(Math.min(dragStart.x, p.x), 0, processedW);
+  const y0 = clamp(Math.min(dragStart.y, p.y), 0, processedH);
+  const w = clamp(Math.abs(p.x - dragStart.x), 0, processedW - x0);
+  const h = clamp(Math.abs(p.y - dragStart.y), 0, processedH - y0);
+  edit.crop = { x: x0, y: y0, w, h };
+  paint();
+}
+function onUp() {
+  dragging = false;
+  if (edit.crop && (edit.crop.w < 3 || edit.crop.h < 3)) edit.crop = null;
+  paint();
+}
+els.editCanvas.addEventListener('mousedown', onDown);
+window.addEventListener('mousemove', onMove);
+window.addEventListener('mouseup', onUp);
+els.editCanvas.addEventListener('touchstart', onDown, { passive: false });
+els.editCanvas.addEventListener('touchmove', onMove, { passive: false });
+els.editCanvas.addEventListener('touchend', onUp);
+
+// --- Toolbar wiring ---------------------------------------------------------
+function syncControls() {
+  els.brightness.value = edit.brightness; els.brightnessVal.textContent = edit.brightness;
+  els.contrast.value = edit.contrast; els.contrastVal.textContent = edit.contrast;
+  els.threshold.value = edit.threshold >= 0 ? edit.threshold : 128;
+  els.thresholdVal.textContent = edit.threshold >= 0 ? edit.threshold : 128;
+  els.threshold.disabled = edit.threshold < 0;
+  els.grayBtn.classList.toggle('active', edit.grayscale);
+  els.bwBtn.classList.toggle('active', edit.threshold >= 0);
+}
+
+els.rotL.addEventListener('click', () => { edit.rotate = (edit.rotate - 90 + 360) % 360; edit.crop = null; syncControls(); paint(); });
+els.rotR.addEventListener('click', () => { edit.rotate = (edit.rotate + 90) % 360; edit.crop = null; syncControls(); paint(); });
+els.grayBtn.addEventListener('click', () => { edit.grayscale = !edit.grayscale; syncControls(); paint(); });
+els.bwBtn.addEventListener('click', () => {
+  edit.threshold = edit.threshold >= 0 ? -1 : 128;
+  syncControls(); paint();
+});
+els.clearCropBtn.addEventListener('click', () => { edit.crop = null; paint(); });
+els.resetBtn.addEventListener('click', () => { edit = defaultEdit(); syncControls(); paint(); });
+
+els.brightness.addEventListener('input', () => { edit.brightness = +els.brightness.value; els.brightnessVal.textContent = edit.brightness; paint(); });
+els.contrast.addEventListener('input', () => { edit.contrast = +els.contrast.value; els.contrastVal.textContent = edit.contrast; paint(); });
+els.threshold.addEventListener('input', () => { edit.threshold = +els.threshold.value; els.thresholdVal.textContent = edit.threshold; paint(); });
+
+// --- Load / clear -----------------------------------------------------------
 function setFile(file) {
   if (!file) return;
-  if (!file.type.startsWith('image/')) {
-    setStatus('Please choose an image file.', 'err');
-    return;
-  }
-  currentFile = file;
-  els.previewImg.src = URL.createObjectURL(file);
-  els.preview.style.display = 'block';
-  els.runBtn.disabled = false;
-  els.clearBtn.disabled = false;
-  setStatus('');
-  els.results.classList.remove('show');
+  if (!file.type.startsWith('image/')) { setStatus('Please choose an image file.', 'err'); return; }
+  const url = URL.createObjectURL(file);
+  const img = new Image();
+  img.onload = () => {
+    srcImg = img;
+    edit = defaultEdit();
+    syncControls();
+    els.drop.style.display = 'none';
+    els.editor.style.display = 'block';
+    els.runBtn.disabled = false;
+    els.clearBtn.disabled = false;
+    setStatus('');
+    els.results.classList.remove('show');
+    paint();
+  };
+  img.onerror = () => setStatus('Could not load that image.', 'err');
+  img.src = url;
 }
 
 function clearAll() {
-  currentFile = null;
-  lastData = null;
-  els.preview.style.display = 'none';
-  els.previewImg.src = '';
+  srcImg = null; processedCanvas = null;
+  els.drop.style.display = 'block';
+  els.editor.style.display = 'none';
   els.fileInput.value = '';
   els.runBtn.disabled = true;
   els.clearBtn.disabled = true;
@@ -278,32 +503,26 @@ function clearAll() {
   els.results.classList.remove('show');
 }
 
-// --- Upload wiring ---
 els.drop.addEventListener('click', () => els.fileInput.click());
-els.fileInput.addEventListener('change', (e) => setFile(e.target.files[0]));
-
+els.fileInput.addEventListener('change', e => setFile(e.target.files[0]));
 ['dragenter', 'dragover'].forEach(ev =>
-  els.drop.addEventListener(ev, (e) => { e.preventDefault(); els.drop.classList.add('drag'); })
+  els.drop.addEventListener(ev, e => { e.preventDefault(); els.drop.classList.add('drag'); })
 );
 ['dragleave', 'drop'].forEach(ev =>
-  els.drop.addEventListener(ev, (e) => { e.preventDefault(); els.drop.classList.remove('drag'); })
+  els.drop.addEventListener(ev, e => { e.preventDefault(); els.drop.classList.remove('drag'); })
 );
-els.drop.addEventListener('drop', (e) => {
+els.drop.addEventListener('drop', e => {
   const f = e.dataTransfer.files && e.dataTransfer.files[0];
   if (f) setFile(f);
 });
-// Allow pasting an image from clipboard.
-window.addEventListener('paste', (e) => {
+window.addEventListener('paste', e => {
   const items = e.clipboardData && e.clipboardData.items;
   if (!items) return;
-  for (const it of items) {
-    if (it.type && it.type.startsWith('image/')) { setFile(it.getAsFile()); break; }
-  }
+  for (const it of items) if (it.type && it.type.startsWith('image/')) { setFile(it.getAsFile()); break; }
 });
-
 els.clearBtn.addEventListener('click', clearAll);
 
-// --- Test connection ---
+// --- Test connection --------------------------------------------------------
 els.testBtn.addEventListener('click', async () => {
   setStatus('Testing connection…');
   try {
@@ -312,25 +531,21 @@ els.testBtn.addEventListener('click', async () => {
     const j = await r.json();
     setStatus('Connected ✓ (' + (j.lang ? 'lang=' + j.lang : 'status ' + r.status) + ')', 'ok');
   } catch (e) {
-    setStatus('Could not reach API: ' + e.message + '. Check the URL and that CORS is enabled.', 'err');
+    setStatus('Could not reach API: ' + e.message, 'err');
   }
 });
 
-// --- Run OCR ---
+// --- Run OCR ----------------------------------------------------------------
 els.runBtn.addEventListener('click', runOcr);
-
 async function runOcr() {
-  if (!currentFile) return;
+  if (!srcImg) return;
   els.runBtn.disabled = true;
-  setStatus('', '');
   els.status.innerHTML = '<span class="spinner"></span>Running OCR… this can take a few seconds on CPU.';
-  const fd = new FormData();
-  fd.append('file', currentFile, currentFile.name);
   try {
-    const r = await fetch(els.endpoint.value.trim().replace(/\/$/, '') + '/ocr', {
-      method: 'POST',
-      body: fd,
-    });
+    const blob = await buildOutputBlob();
+    const fd = new FormData();
+    fd.append('file', blob, 'edited.png');
+    const r = await fetch(els.endpoint.value.trim().replace(/\/$/, '') + '/ocr', { method: 'POST', body: fd });
     if (!r.ok) {
       let detail = '';
       try { detail = (await r.json()).detail || ''; } catch (_) { detail = await r.text(); }
@@ -346,30 +561,21 @@ async function runOcr() {
   }
 }
 
-// --- Render results ---
+// --- Render results ---------------------------------------------------------
 function render(data) {
   const meta = data._meta || {};
   const rawLines = (meta.raw_lines || []).slice();
-  const fullText = rawLines.join('\n').trim();
+  els.textOut.textContent = rawLines.join('\n').trim();
 
-  els.textOut.textContent = fullText;
-
-  // Meta pills
   const pills = [];
-  pills.push(meta.mrz_detected
-    ? '<span class="meta-pill ok">MRZ detected</span>'
-    : '<span class="meta-pill">no MRZ</span>');
+  pills.push(meta.mrz_detected ? '<span class="meta-pill ok">MRZ detected</span>' : '<span class="meta-pill">no MRZ</span>');
   const checks = meta.mrz_checks;
-  if (checks) {
-    const overall = checks.overall_valid;
-    pills.push(overall
-      ? '<span class="meta-pill ok">checksum valid</span>'
-      : '<span class="meta-pill bad">checksum mismatch</span>');
-  }
+  if (checks) pills.push(checks.overall_valid
+    ? '<span class="meta-pill ok">checksum valid</span>'
+    : '<span class="meta-pill bad">checksum mismatch</span>');
   pills.push('<span class="meta-pill">' + rawLines.length + ' lines</span>');
   els.meta.innerHTML = pills.join(' ');
 
-  // Structured fields
   const fieldOrder = [
     'passport_number', 'surname', 'given_name', 'nationality', 'sex',
     'date_of_birth', 'date_of_issue', 'date_of_expiry',
@@ -378,11 +584,9 @@ function render(data) {
   const rows = fieldOrder
     .filter(k => data[k] !== undefined && data[k] !== null && data[k] !== '')
     .map(k => fieldRow(k.replace(/_/g, ' '), data[k]));
-
   if (rows.length) {
     els.fieldsCard.style.display = 'block';
     els.fieldsBody.innerHTML = rows.join('');
-    // Wire per-field copy buttons.
     els.fieldsBody.querySelectorAll('[data-copy]').forEach(b =>
       b.addEventListener('click', () => copy(b.getAttribute('data-copy')))
     );
@@ -396,25 +600,16 @@ function render(data) {
 
 function fieldRow(label, value) {
   const v = String(value);
-  return (
-    '<div class="field-row">' +
-      '<div class="k">' + escapeHtml(label) + '</div>' +
-      '<div class="v">' + escapeHtml(v) + '</div>' +
-      '<button class="btn ghost small" data-copy="' + escapeAttr(v) + '">Copy</button>' +
-    '</div>'
-  );
+  return '<div class="field-row">' +
+    '<div class="k">' + escapeHtml(label) + '</div>' +
+    '<div class="v">' + escapeHtml(v) + '</div>' +
+    '<button class="btn ghost small" data-copy="' + escapeAttr(v) + '">Copy</button>' +
+    '</div>';
 }
+function escapeHtml(s) { return s.replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
+function escapeAttr(s) { return s.replace(/"/g, '&quot;').replace(/</g, '&lt;'); }
 
-function escapeHtml(s) {
-  return s.replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
-}
-function escapeAttr(s) {
-  return s.replace(/"/g, '&quot;').replace(/</g, '&lt;');
-}
-
-// --- Copy buttons ---
 els.copyTextBtn.addEventListener('click', () => copy(els.textOut.textContent));
-
 els.copyFieldsBtn.addEventListener('click', () => {
   if (!lastData) return;
   const fieldOrder = [
