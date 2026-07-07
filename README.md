@@ -40,4 +40,3 @@ Response:
 - Language is hardcoded to English in `app.py` — not configurable via env var.
 - Adjust `deploy.resources.limits.memory` in `docker-compose.yml` based on
   your VPS size.
-# paddleOcr
