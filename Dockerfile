@@ -20,6 +20,7 @@ RUN pip install --no-cache-dir -r requirements.txt
 RUN python -c "from paddleocr import PaddleOCR; PaddleOCR(ocr_version='PP-OCRv6', lang='en', use_doc_orientation_classify=False, use_doc_unwarping=False, use_textline_orientation=True)"
 
 COPY app.py .
+COPY static/ ./static/
 
 EXPOSE 8000
 

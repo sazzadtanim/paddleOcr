@@ -3,6 +3,8 @@ import re
 import numpy as np
 from fastapi import FastAPI, File, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
+from pathlib import Path
 from paddleocr import PaddleOCR
 from PIL import Image
 
@@ -487,3 +489,12 @@ async def run_ocr(file: UploadFile = File(...)):
         },
     }
     return response
+
+
+# Serve the standalone browser UI (static/index.html). Mounted LAST so the
+# API routes above (/health, /ocr) are matched first — Starlette checks
+# routes in registration order, so a catch-all mount at "/" must come after
+# every explicit endpoint.
+_STATIC_DIR = Path(__file__).parent / "static"
+if _STATIC_DIR.is_dir():
+    app.mount("/", StaticFiles(directory=str(_STATIC_DIR), html=True), name="static")
