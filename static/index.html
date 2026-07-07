@@ -218,7 +218,7 @@
           <input type="range" id="threshold" min="0" max="255" value="128" disabled />
           <span class="val" id="thresholdVal">128</span>
         </div>
-        <div class="crop-hint">Drag on the image to crop. The bright box is what gets read; everything dimmed is discarded.</div>
+        <div class="crop-hint">Drag on the image to crop — the selection zooms to fill the canvas so you can verify it before running OCR. Drag again anywhere (or hit Clear crop) to re-select.</div>
       </div>
 
       <div class="actions">
@@ -387,13 +387,29 @@ function paint() {
   buildProcessed();
   if (!processedCanvas) return;
   const dc = els.editCanvas;
-  dc.width = processedW; dc.height = processedH;
   const ctx = dc.getContext('2d');
+  const cr = edit.crop;
+
+  // Once a crop is finalized (not actively dragging), zoom so the cropped
+  // region fills the whole canvas — easy to verify exactly what gets read.
+  if (cr && cr.w > 2 && cr.h > 2 && !dragging) {
+    const maxDim = 1600;
+    const scale = Math.min(maxDim / cr.w, maxDim / cr.h);
+    const cw = Math.max(1, Math.round(cr.w * scale));
+    const ch = Math.max(1, Math.round(cr.h * scale));
+    dc.width = cw; dc.height = ch;
+    ctx.imageSmoothingEnabled = true;
+    ctx.imageSmoothingQuality = 'high';
+    ctx.drawImage(processedCanvas, cr.x, cr.y, cr.w, cr.h, 0, 0, cw, ch);
+    return;
+  }
+
+  // Otherwise show the full image with the crop-selection overlay.
+  dc.width = processedW; dc.height = processedH;
   ctx.drawImage(processedCanvas, 0, 0);
 
-  // Crop overlay: dim outside the box, bright border on the box.
-  if (edit.crop) {
-    const { x, y, w, h } = edit.crop;
+  if (cr) {
+    const { x, y, w, h } = cr;
     const lw = Math.max(2, processedW / 240);
     ctx.save();
     ctx.fillStyle = 'rgba(0,0,0,0.55)';
@@ -437,6 +453,12 @@ let dragging = false, dragStart = null;
 function onDown(e) {
   if (!processedCanvas) return;
   e.preventDefault();
+  // Zoomed into a finalized crop? Drop back to the full image first so the
+  // new drag is measured against the whole picture, not the zoomed view.
+  if (edit.crop && !dragging) {
+    edit.crop = null;
+    paint();
+  }
   dragging = true;
   dragStart = eventPos(e);
   edit.crop = { x: dragStart.x, y: dragStart.y, w: 0, h: 0 };
