@@ -21,5 +21,10 @@ services:
       resources:
         limits:
           memory: 2G
+    networks:
+      - dokploy-network
 volumes:
   paddleocr_models:
+networks:
+  dokploy-network:
+    external: true
