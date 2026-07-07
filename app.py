@@ -34,6 +34,49 @@ def health():
 # OCR
 # ---------------------------------------------------------------------------
 
+def _ocr_fields(res):
+    """Locate the dict holding rec_texts / dt_polys on a 3.x OCRResult.
+
+    print() shows these at the top level of the result's *internal* dict, but the
+    ``.json`` serialization can wrap or nest them (e.g. under a result wrapper).
+    Rather than assume one shape, search: direct dict access → dict(res) →
+    ``.json`` → one level of nesting → attribute access. Returns the first dict
+    that has both ``rec_texts`` and ``dt_polys``.
+    """
+    # 1. dict-like access on the object itself
+    try:
+        if "rec_texts" in res and "dt_polys" in res:
+            return res
+    except TypeError:
+        pass
+    # 2. coerce to dict
+    try:
+        d = dict(res)
+        if "rec_texts" in d and "dt_polys" in d:
+            return d
+    except (TypeError, ValueError):
+        pass
+    # 3. .json serialization (top level, then one level nested)
+    j = getattr(res, "json", None)
+    if isinstance(j, dict):
+        if "rec_texts" in j and "dt_polys" in j:
+            return j
+        for v in j.values():
+            if isinstance(v, dict) and "rec_texts" in v and "dt_polys" in v:
+                return v
+    # 4. attribute access fallback
+    if all(hasattr(res, k) for k in ("rec_texts", "dt_polys")):
+        return {
+            "rec_texts": res.rec_texts,
+            "rec_scores": getattr(res, "rec_scores", []),
+            "dt_polys": res.dt_polys,
+        }
+    raise RuntimeError(
+        "Could not locate OCR fields on result; .json keys = "
+        + str(list(j.keys()) if isinstance(j, dict) else type(res))
+    )
+
+
 def run_raw_ocr(img_array):
     """Run PaddleOCR (PP-OCRv6) and return recognized text lines (top to bottom).
 
@@ -45,12 +88,14 @@ def run_raw_ocr(img_array):
     """
     results = ocr.predict(img_array)
     res = results[0]
-    data = getattr(res, "json", None) or res
+    data = _ocr_fields(res)
+
+    texts = data["rec_texts"]
+    polys = data["dt_polys"]
+    scores = data.get("rec_scores") or [0.0] * len(texts)
 
     lines = []
-    for text, confidence, poly in zip(
-        data["rec_texts"], data["rec_scores"], data["dt_polys"]
-    ):
+    for text, confidence, poly in zip(texts, scores, polys):
         box = [[float(p[0]), float(p[1])] for p in poly]
         y = min(point[1] for point in box)
         lines.append({"text": text, "confidence": float(confidence), "y": y})
