@@ -1,0 +1,428 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>PaddleOCR — Image to Text</title>
+<style>
+  :root {
+    --bg: #0f172a;
+    --panel: #1e293b;
+    --panel-2: #273449;
+    --border: #334155;
+    --text: #e2e8f0;
+    --muted: #94a3b8;
+    --accent: #6366f1;
+    --accent-hover: #4f46e5;
+    --ok: #10b981;
+    --err: #ef4444;
+    --radius: 14px;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; padding: 0; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    background: radial-gradient(1200px 800px at 20% -10%, #1e293b 0%, var(--bg) 55%);
+    color: var(--text);
+    min-height: 100vh;
+    padding: 32px 20px 64px;
+  }
+  .wrap { max-width: 880px; margin: 0 auto; }
+  header { text-align: center; margin-bottom: 28px; }
+  header h1 { font-size: 26px; margin: 0 0 6px; letter-spacing: -0.02em; }
+  header p { margin: 0; color: var(--muted); font-size: 14px; }
+
+  .card {
+    background: linear-gradient(180deg, var(--panel) 0%, var(--panel-2) 100%);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 22px;
+    margin-bottom: 20px;
+  }
+
+  .settings { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+  .settings label { font-size: 13px; color: var(--muted); }
+  .settings input[type="text"] {
+    flex: 1; min-width: 220px;
+    background: var(--bg); color: var(--text);
+    border: 1px solid var(--border); border-radius: 10px;
+    padding: 9px 12px; font-size: 14px; outline: none;
+  }
+  .settings input[type="text"]:focus { border-color: var(--accent); }
+
+  .drop {
+    border: 2px dashed var(--border);
+    border-radius: var(--radius);
+    padding: 38px 20px;
+    text-align: center;
+    cursor: pointer;
+    transition: border-color .15s, background .15s, transform .05s;
+    user-select: none;
+  }
+  .drop:hover { border-color: var(--accent); background: rgba(99,102,241,.05); }
+  .drop.drag { border-color: var(--accent); background: rgba(99,102,241,.12); }
+  .drop .big { font-size: 40px; line-height: 1; margin-bottom: 8px; }
+  .drop .hint { color: var(--muted); font-size: 13px; margin-top: 6px; }
+  .drop input { display: none; }
+
+  .preview { display: none; margin-top: 16px; text-align: center; }
+  .preview img {
+    max-width: 100%; max-height: 320px; border-radius: 10px;
+    border: 1px solid var(--border); object-fit: contain; background: #000;
+  }
+
+  .actions { display: flex; gap: 10px; margin-top: 16px; flex-wrap: wrap; }
+  button.btn {
+    background: var(--accent); color: #fff; border: none; border-radius: 10px;
+    padding: 11px 18px; font-size: 14px; font-weight: 600; cursor: pointer;
+    transition: background .15s, transform .05s, opacity .15s;
+  }
+  button.btn:hover { background: var(--accent-hover); }
+  button.btn:active { transform: translateY(1px); }
+  button.btn:disabled { opacity: .5; cursor: not-allowed; }
+  button.btn.ghost {
+    background: transparent; color: var(--text); border: 1px solid var(--border);
+  }
+  button.btn.ghost:hover { background: rgba(255,255,255,.05); }
+  button.btn.small { padding: 6px 12px; font-size: 12px; font-weight: 500; }
+
+  .status { margin-top: 14px; font-size: 14px; color: var(--muted); min-height: 20px; }
+  .status.err { color: var(--err); }
+  .status.ok { color: var(--ok); }
+  .spinner {
+    display: inline-block; width: 14px; height: 14px; margin-right: 8px;
+    border: 2px solid var(--muted); border-top-color: transparent;
+    border-radius: 50%; animation: spin .8s linear infinite; vertical-align: -2px;
+  }
+  @keyframes spin { to { transform: rotate(360deg); } }
+
+  .results { display: none; }
+  .results.show { display: block; }
+  .results h2 { font-size: 15px; margin: 0 0 14px; color: var(--text); }
+
+  .text-out {
+    background: var(--bg); border: 1px solid var(--border); border-radius: 10px;
+    padding: 14px; font-family: "SFMono-Regular", ui-monospace, Menlo, Consolas, monospace;
+    font-size: 13.5px; line-height: 1.6; white-space: pre-wrap; word-break: break-word;
+    max-height: 360px; overflow: auto; color: #f1f5f9;
+  }
+  .text-out:empty::before { content: "No text detected."; color: var(--muted); }
+
+  .field-row {
+    display: flex; align-items: center; justify-content: space-between; gap: 12px;
+    padding: 10px 0; border-bottom: 1px solid var(--border);
+  }
+  .field-row:last-child { border-bottom: none; }
+  .field-row .k { color: var(--muted); font-size: 13px; min-width: 150px; text-transform: capitalize; }
+  .field-row .v { font-size: 14px; flex: 1; word-break: break-word; font-family: ui-monospace, Menlo, Consolas, monospace; }
+  .field-row .v.empty { color: var(--muted); font-style: italic; font-family: inherit; }
+
+  .toast {
+    position: fixed; bottom: 24px; left: 50%; transform: translateX(-50%) translateY(20px);
+    background: var(--ok); color: #fff; padding: 10px 18px; border-radius: 10px;
+    font-size: 14px; font-weight: 600; opacity: 0; pointer-events: none;
+    transition: opacity .2s, transform .2s; z-index: 50;
+  }
+  .toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
+
+  .meta-pill {
+    display: inline-block; font-size: 12px; padding: 3px 9px; border-radius: 999px;
+    border: 1px solid var(--border); color: var(--muted); margin-right: 6px;
+  }
+  .meta-pill.ok { color: var(--ok); border-color: rgba(16,185,129,.4); background: rgba(16,185,129,.1); }
+  .meta-pill.bad { color: var(--err); border-color: rgba(239,68,68,.4); background: rgba(239,68,68,.1); }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <h1>📷 Image to Text</h1>
+    <p>Upload an image, get the OCR text out — copy it with one click.</p>
+  </header>
+
+  <!-- API settings -->
+  <div class="card">
+    <div class="settings">
+      <label for="endpoint">API URL</label>
+      <input id="endpoint" type="text" value="http://localhost:8000" placeholder="http://localhost:8000" />
+      <button class="btn ghost small" id="testBtn">Test</button>
+    </div>
+  </div>
+
+  <!-- Upload -->
+  <div class="card">
+    <div class="drop" id="drop">
+      <div class="big">⬆️</div>
+      <div><strong>Drop an image here</strong> or click to browse</div>
+      <div class="hint">PNG, JPG, WEBP, BMP, GIF</div>
+      <input id="fileInput" type="file" accept="image/*" />
+    </div>
+    <div class="preview" id="preview">
+      <img id="previewImg" alt="preview" />
+    </div>
+    <div class="actions">
+      <button class="btn" id="runBtn" disabled>Run OCR</button>
+      <button class="btn ghost" id="clearBtn" disabled>Clear</button>
+    </div>
+    <div class="status" id="status"></div>
+  </div>
+
+  <!-- Results -->
+  <div class="results" id="results">
+    <div class="card">
+      <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:14px; flex-wrap:wrap; gap:10px;">
+        <h2 style="margin:0;">Extracted Text</h2>
+        <button class="btn small" id="copyTextBtn">📋 Copy text</button>
+      </div>
+      <div class="text-out" id="textOut"></div>
+      <div id="meta" style="margin-top:12px; font-size:12px;"></div>
+    </div>
+
+    <div class="card" id="fieldsCard" style="display:none;">
+      <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:14px;">
+        <h2 style="margin:0;">Detected Fields</h2>
+        <button class="btn small" id="copyFieldsBtn">📋 Copy all fields</button>
+      </div>
+      <div id="fieldsBody"></div>
+    </div>
+  </div>
+</div>
+
+<div class="toast" id="toast">Copied!</div>
+
+<script>
+const els = {
+  endpoint: document.getElementById('endpoint'),
+  testBtn: document.getElementById('testBtn'),
+  drop: document.getElementById('drop'),
+  fileInput: document.getElementById('fileInput'),
+  preview: document.getElementById('preview'),
+  previewImg: document.getElementById('previewImg'),
+  runBtn: document.getElementById('runBtn'),
+  clearBtn: document.getElementById('clearBtn'),
+  status: document.getElementById('status'),
+  results: document.getElementById('results'),
+  textOut: document.getElementById('textOut'),
+  meta: document.getElementById('meta'),
+  fieldsCard: document.getElementById('fieldsCard'),
+  fieldsBody: document.getElementById('fieldsBody'),
+  copyTextBtn: document.getElementById('copyTextBtn'),
+  copyFieldsBtn: document.getElementById('copyFieldsBtn'),
+  toast: document.getElementById('toast'),
+};
+
+let currentFile = null;
+let lastData = null;
+
+// Persist the endpoint across reloads.
+const SAVED = localStorage.getItem('ocrEndpoint');
+if (SAVED) els.endpoint.value = SAVED;
+els.endpoint.addEventListener('change', () => localStorage.setItem('ocrEndpoint', els.endpoint.value.trim()));
+
+function setStatus(msg, kind) {
+  els.status.textContent = msg || '';
+  els.status.className = 'status' + (kind ? ' ' + kind : '');
+}
+
+function showToast(text) {
+  els.toast.textContent = text || 'Copied!';
+  els.toast.classList.add('show');
+  clearTimeout(showToast._t);
+  showToast._t = setTimeout(() => els.toast.classList.remove('show'), 1500);
+}
+
+async function copy(text) {
+  if (!text) { showToast('Nothing to copy'); return; }
+  try {
+    await navigator.clipboard.writeText(text);
+    showToast('Copied!');
+  } catch (e) {
+    // Fallback for non-secure contexts (e.g. http://)
+    const ta = document.createElement('textarea');
+    ta.value = text; ta.style.position = 'fixed'; ta.style.opacity = '0';
+    document.body.appendChild(ta); ta.select();
+    try { document.execCommand('copy'); showToast('Copied!'); }
+    catch (_) { showToast('Copy failed — select manually'); }
+    document.body.removeChild(ta);
+  }
+}
+
+function setFile(file) {
+  if (!file) return;
+  if (!file.type.startsWith('image/')) {
+    setStatus('Please choose an image file.', 'err');
+    return;
+  }
+  currentFile = file;
+  els.previewImg.src = URL.createObjectURL(file);
+  els.preview.style.display = 'block';
+  els.runBtn.disabled = false;
+  els.clearBtn.disabled = false;
+  setStatus('');
+  els.results.classList.remove('show');
+}
+
+function clearAll() {
+  currentFile = null;
+  lastData = null;
+  els.preview.style.display = 'none';
+  els.previewImg.src = '';
+  els.fileInput.value = '';
+  els.runBtn.disabled = true;
+  els.clearBtn.disabled = true;
+  setStatus('');
+  els.results.classList.remove('show');
+}
+
+// --- Upload wiring ---
+els.drop.addEventListener('click', () => els.fileInput.click());
+els.fileInput.addEventListener('change', (e) => setFile(e.target.files[0]));
+
+['dragenter', 'dragover'].forEach(ev =>
+  els.drop.addEventListener(ev, (e) => { e.preventDefault(); els.drop.classList.add('drag'); })
+);
+['dragleave', 'drop'].forEach(ev =>
+  els.drop.addEventListener(ev, (e) => { e.preventDefault(); els.drop.classList.remove('drag'); })
+);
+els.drop.addEventListener('drop', (e) => {
+  const f = e.dataTransfer.files && e.dataTransfer.files[0];
+  if (f) setFile(f);
+});
+// Allow pasting an image from clipboard.
+window.addEventListener('paste', (e) => {
+  const items = e.clipboardData && e.clipboardData.items;
+  if (!items) return;
+  for (const it of items) {
+    if (it.type && it.type.startsWith('image/')) { setFile(it.getAsFile()); break; }
+  }
+});
+
+els.clearBtn.addEventListener('click', clearAll);
+
+// --- Test connection ---
+els.testBtn.addEventListener('click', async () => {
+  setStatus('Testing connection…');
+  try {
+    const r = await fetch(els.endpoint.value.trim().replace(/\/$/, '') + '/health');
+    if (!r.ok) throw new Error('HTTP ' + r.status);
+    const j = await r.json();
+    setStatus('Connected ✓ (' + (j.lang ? 'lang=' + j.lang : 'status ' + r.status) + ')', 'ok');
+  } catch (e) {
+    setStatus('Could not reach API: ' + e.message + '. Check the URL and that CORS is enabled.', 'err');
+  }
+});
+
+// --- Run OCR ---
+els.runBtn.addEventListener('click', runOcr);
+
+async function runOcr() {
+  if (!currentFile) return;
+  els.runBtn.disabled = true;
+  setStatus('', '');
+  els.status.innerHTML = '<span class="spinner"></span>Running OCR… this can take a few seconds on CPU.';
+  const fd = new FormData();
+  fd.append('file', currentFile, currentFile.name);
+  try {
+    const r = await fetch(els.endpoint.value.trim().replace(/\/$/, '') + '/ocr', {
+      method: 'POST',
+      body: fd,
+    });
+    if (!r.ok) {
+      let detail = '';
+      try { detail = (await r.json()).detail || ''; } catch (_) { detail = await r.text(); }
+      throw new Error('HTTP ' + r.status + (detail ? ' — ' + detail : ''));
+    }
+    lastData = await r.json();
+    render(lastData);
+    setStatus('Done ✓', 'ok');
+  } catch (e) {
+    setStatus('OCR failed: ' + e.message, 'err');
+  } finally {
+    els.runBtn.disabled = false;
+  }
+}
+
+// --- Render results ---
+function render(data) {
+  const meta = data._meta || {};
+  const rawLines = (meta.raw_lines || []).slice();
+  const fullText = rawLines.join('\n').trim();
+
+  els.textOut.textContent = fullText;
+
+  // Meta pills
+  const pills = [];
+  pills.push(meta.mrz_detected
+    ? '<span class="meta-pill ok">MRZ detected</span>'
+    : '<span class="meta-pill">no MRZ</span>');
+  const checks = meta.mrz_checks;
+  if (checks) {
+    const overall = checks.overall_valid;
+    pills.push(overall
+      ? '<span class="meta-pill ok">checksum valid</span>'
+      : '<span class="meta-pill bad">checksum mismatch</span>');
+  }
+  pills.push('<span class="meta-pill">' + rawLines.length + ' lines</span>');
+  els.meta.innerHTML = pills.join(' ');
+
+  // Structured fields
+  const fieldOrder = [
+    'passport_number', 'surname', 'given_name', 'nationality', 'sex',
+    'date_of_birth', 'date_of_issue', 'date_of_expiry',
+    'place_of_birth', 'issuing_authority', 'personal_number', 'previous_passport_number',
+  ];
+  const rows = fieldOrder
+    .filter(k => data[k] !== undefined && data[k] !== null && data[k] !== '')
+    .map(k => fieldRow(k.replace(/_/g, ' '), data[k]));
+
+  if (rows.length) {
+    els.fieldsCard.style.display = 'block';
+    els.fieldsBody.innerHTML = rows.join('');
+    // Wire per-field copy buttons.
+    els.fieldsBody.querySelectorAll('[data-copy]').forEach(b =>
+      b.addEventListener('click', () => copy(b.getAttribute('data-copy')))
+    );
+  } else {
+    els.fieldsCard.style.display = 'none';
+  }
+
+  els.results.classList.add('show');
+  els.results.scrollIntoView({ behavior: 'smooth', block: 'start' });
+}
+
+function fieldRow(label, value) {
+  const v = String(value);
+  return (
+    '<div class="field-row">' +
+      '<div class="k">' + escapeHtml(label) + '</div>' +
+      '<div class="v">' + escapeHtml(v) + '</div>' +
+      '<button class="btn ghost small" data-copy="' + escapeAttr(v) + '">Copy</button>' +
+    '</div>'
+  );
+}
+
+function escapeHtml(s) {
+  return s.replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+}
+function escapeAttr(s) {
+  return s.replace(/"/g, '&quot;').replace(/</g, '&lt;');
+}
+
+// --- Copy buttons ---
+els.copyTextBtn.addEventListener('click', () => copy(els.textOut.textContent));
+
+els.copyFieldsBtn.addEventListener('click', () => {
+  if (!lastData) return;
+  const fieldOrder = [
+    'passport_number', 'surname', 'given_name', 'nationality', 'sex',
+    'date_of_birth', 'date_of_issue', 'date_of_expiry',
+    'place_of_birth', 'issuing_authority', 'personal_number', 'previous_passport_number',
+  ];
+  const lines = fieldOrder
+    .filter(k => lastData[k] !== undefined && lastData[k] !== null && lastData[k] !== '')
+    .map(k => k.replace(/_/g, ' ') + ': ' + lastData[k]);
+  copy(lines.join('\n'));
+});
+</script>
+</body>
+</html>

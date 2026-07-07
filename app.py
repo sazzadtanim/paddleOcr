@@ -2,10 +2,21 @@ import io
 import re
 import numpy as np
 from fastapi import FastAPI, File, UploadFile
+from fastapi.middleware.cors import CORSMiddleware
 from paddleocr import PaddleOCR
 from PIL import Image
 
 app = FastAPI()
+
+# Allow the standalone browser UI (and any other client) to call the API.
+# File uploads don't use credentials, so a permissive origin is safe here.
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=False,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 # Forced English, PP-OCRv6 — not configurable via env var
 LANG = "en"
