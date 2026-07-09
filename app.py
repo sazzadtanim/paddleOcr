@@ -305,7 +305,7 @@ def parse_mrz(line1, line2, raw_lines):
 
 # ---------------------------------------------------------------------------
 # VIZ (printed text) — fields not present in the MRZ at all: date_of_issue,
-# place_of_birth, issuing_authority, previous_passport_number.
+# place_of_birth, issuing_authority, previous_passport_number, permanent_address.
 #
 # OCR frequently garbles these labels beyond simple substring matching (e.g.
 # "Surname" -> "Sumame", "Issuing Authority" -> "ssuing Auhorty"), and
@@ -359,6 +359,76 @@ def find_previous_passport_number(lines, current_passport_number):
         if PASSPORT_LIKE_RE.match(token) and token != current_passport_number:
             return token
     return None
+
+
+# Permanent Address is a multi-line VIZ field printed on the personal-data
+# page (no MRZ counterpart). The label and its value often share one line
+# ("Permanent Address: HAWLIPARA, RUPGANJ, ..."), and the value can wrap onto
+# further lines. We start at the label, take any same-line value after the
+# colon, then keep collecting lines until we hit the next field label
+# (Emergency Contact, Name, Telephone No, a biodata label, a date, the MRZ).
+# Word-boundary matching avoids false stops on place names like "Middlesex".
+_ADDRESS_STOP_RE = re.compile(
+    r"\b(emergency|contact|relationship|telephone|phone|mobile|"
+    r"father|mother|guardian|spouse|name|birth|authority|issuing|"
+    r"nationality|passport|signature|date|sex|holder|surname|given)\b",
+    re.IGNORECASE,
+)
+# Cap how many continuation lines we gather, so a missing stop label can't
+# drag the rest of the document into the address.
+_ADDRESS_MAX_LINES = 6
+
+
+def _is_address_stop(text):
+    """True if a line marks the end of the Permanent Address value — a label,
+    a section header, a date, or the MRZ."""
+    t = text.strip()
+    if not t:
+        return True
+    if t.endswith(":") or t.endswith("."):
+        return True
+    if DATE_TEXT_RE.search(t) or NUMERIC_DATE_RE.match(t):
+        return True
+    # MRZ lines (TD3): "P<<COUNTRY..." or a long alphanumeric check-digit line.
+    if t.startswith("P<") or (len(t) >= 28 and t.replace(" ", "").isalnum()):
+        return True
+    return bool(_ADDRESS_STOP_RE.search(t))
+
+
+def _same_line_address_value(text):
+    """Pull the value that shares a line with the "Permanent Address" label —
+    the text after a colon if present, otherwise the text after the word
+    "address". Empty string when the value is on later lines."""
+    if ":" in text:
+        return text.split(":", 1)[1].strip()
+    return re.sub(r"^.*?\baddress\b", "", text, flags=re.IGNORECASE).strip()
+
+
+def find_permanent_address(lines):
+    """Extract the (possibly multi-line) Permanent Address, concatenated into
+    a single string. Returns None if no address label is found."""
+    start = None
+    for i, l in enumerate(lines):
+        tl = l["text"].lower()
+        if "address" in tl or "permanent" in tl:
+            start = i
+            break
+    if start is None:
+        return None
+
+    parts = []
+    first = _same_line_address_value(lines[start]["text"])
+    if first and not _is_address_stop(first):
+        parts.append(first)
+
+    for l in lines[start + 1 : start + 1 + _ADDRESS_MAX_LINES]:
+        if _is_address_stop(l["text"]):
+            break
+        parts.append(l["text"].strip())
+
+    if not parts:
+        return None
+    return " ".join(p for p in parts if p)
 
 
 # Field labels are heavily garbled by OCR (the left side is often noise, e.g.
@@ -471,6 +541,7 @@ async def run_ocr(file: UploadFile = File(...)):
     previous_passport_number = find_previous_passport_number(
         lines, mrz_fields.get("passport_number")
     )
+    permanent_address = find_permanent_address(lines)
 
     response = {
         "passport_number": mrz_fields.get("passport_number"),
@@ -483,6 +554,7 @@ async def run_ocr(file: UploadFile = File(...)):
         "date_of_expiry": mrz_fields.get("date_of_expiry"),
         "place_of_birth": viz_fields.get("place_of_birth"),
         "issuing_authority": viz_fields.get("issuing_authority"),
+        "permanent_address": permanent_address,
         "personal_number": mrz_fields.get("personal_number"),
         "previous_passport_number": previous_passport_number,
         "_meta": {
